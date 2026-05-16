@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fabric ConfigBuilder — Redesign Preview</title>
+<style>
+  :root{
+    --brand-50:#eef3f8; --brand-100:#d4e1ee; --brand-300:#7fa3c4;
+    --brand-500:#3a6ea5; --brand-600:#2f5a87; --brand-700:#244569; --brand-900:#16283d;
+    --s0:#ffffff; --s25:#fbfcfd; --s50:#f4f6f8; --s100:#e8ecf0;
+    --s200:#d5dbe2; --s300:#b3bcc7; --s500:#6b7785; --s700:#3c4654; --s900:#1a2230;
+    --success:#1f9d57; --warning:#c77700; --error:#d23f3f;
+    --r-sm:6px; --r-md:8px; --r-lg:12px;
+    --sh-sm:0 1px 2px rgba(16,24,40,.06);
+    --sh-md:0 4px 12px rgba(16,24,40,.08);
+    --sh-lg:0 12px 28px rgba(16,24,40,.12);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    font-family:"Inter Tight","Segoe UI",system-ui,sans-serif;
+    background:var(--s50);color:var(--s900);
+    -webkit-font-smoothing:antialiased;font-size:14px;
+  }
+  .app{display:flex;min-height:100vh}
+
+  /* Sidebar */
+  .sidebar{
+    width:248px;background:var(--s0);border-right:1px solid var(--s100);
+    display:flex;flex-direction:column;position:fixed;height:100vh;
+  }
+  .brand{display:flex;align-items:center;gap:12px;padding:20px 20px}
+  .brand-mark{
+    width:34px;height:34px;border-radius:8px;color:#fff;display:grid;place-items:center;
+    background:linear-gradient(135deg,var(--brand-500),var(--brand-700));
+    box-shadow:var(--sh-sm);
+  }
+  .brand-name{font-weight:800;font-size:.95rem;line-height:1.1}
+  .brand-sub{font-size:.68rem;color:var(--s500)}
+  .divider{border:0;border-top:1px solid var(--s100)}
+  .nav{flex:1;overflow-y:auto;padding:8px 0}
+  .nav-section{
+    padding:14px 20px 6px;font-size:.66rem;font-weight:700;
+    letter-spacing:.08em;text-transform:uppercase;color:var(--s300);
+  }
+  .nav-item{
+    display:flex;align-items:center;gap:12px;margin:2px 8px;padding:9px 12px;
+    border-radius:6px;color:var(--s500);cursor:pointer;text-decoration:none;
+    transition:background .15s,color .15s;
+  }
+  .nav-item:hover{background:var(--s50)}
+  .nav-item.active{background:var(--brand-50);color:var(--brand-700)}
+  .nav-item.active .nav-ico{color:var(--brand-600)}
+  .nav-ico{width:20px;height:20px;color:var(--s500);flex-shrink:0}
+  .nav-label{font-size:.86rem;font-weight:600}
+  .nav-sub{font-size:.7rem;color:var(--s500)}
+  .nav-item.active .nav-sub{color:var(--brand-600);opacity:.8}
+  .user{display:flex;align-items:center;gap:12px;padding:16px}
+  .avatar{
+    width:32px;height:32px;border-radius:50%;background:var(--brand-100);
+    color:var(--brand-700);font-size:.8rem;font-weight:700;
+    display:grid;place-items:center;flex-shrink:0;
+  }
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--success)}
+
+  /* Main */
+  .main{flex:1;margin-left:248px;display:flex;flex-direction:column;min-width:0}
+  .topbar{
+    height:60px;padding:0 32px;display:flex;align-items:center;gap:12px;
+    border-bottom:1px solid var(--s100);background:rgba(255,255,255,.8);
+    backdrop-filter:blur(8px);position:sticky;top:0;z-index:10;
+  }
+  .topbar h1{font-weight:700;font-size:.95rem}
+  .chip{
+    font-size:.68rem;background:var(--s50);color:var(--s500);
+    border:1px solid var(--s100);padding:3px 10px;border-radius:6px;font-weight:600;
+  }
+  .content{flex:1;padding:32px;overflow:auto}
+
+  .page-title{font-size:1.2rem;font-weight:700;letter-spacing:-.01em}
+  .page-desc{color:var(--s500);font-size:.85rem;margin-top:6px;max-width:680px}
+
+  .toolbar{display:flex;gap:12px;margin:24px 0 22px}
+  .btn{
+    border:0;border-radius:6px;padding:8px 16px;font-size:.85rem;font-weight:600;
+    font-family:inherit;cursor:pointer;display:inline-flex;align-items:center;gap:7px;
+    transition:filter .15s,background .15s;
+  }
+  .btn svg{width:16px;height:16px}
+  .btn-primary{
+    color:#fff;background:linear-gradient(180deg,var(--brand-500),var(--brand-600));
+  }
+  .btn-primary:hover{filter:brightness(1.07)}
+  .btn-outline{background:#fff;border:1px solid var(--s200);color:var(--s700)}
+  .btn-outline:hover{background:var(--s50)}
+  .btn-danger{background:#fff;border:1px solid var(--s200);color:var(--error)}
+  .btn-danger:hover{background:#fdf3f3}
+  .spacer{flex:1}
+
+  .card{
+    background:#fff;border:1px solid var(--s100);border-radius:12px;
+    box-shadow:var(--sh-sm);margin-bottom:24px;
+  }
+  .card-body{padding:22px}
+  .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .field label{
+    display:block;font-size:.74rem;font-weight:600;color:var(--s500);
+    margin-bottom:5px;text-transform:uppercase;letter-spacing:.03em;
+  }
+  .field input,.field select{
+    width:100%;padding:8px 11px;border:1px solid var(--s200);border-radius:6px;
+    font-size:.85rem;font-family:inherit;color:var(--s900);background:#fff;
+    transition:border-color .15s,box-shadow .15s;
+  }
+  .field input:focus,.field select:focus{
+    outline:0;border-color:var(--brand-500);
+    box-shadow:0 0 0 3px rgba(58,110,165,.15);
+  }
+  .check-row{display:flex;align-items:center;gap:8px;padding-top:22px}
+  .check-row input{width:16px;height:16px;accent-color:var(--brand-500)}
+  .check-row label{font-size:.82rem;color:var(--s700);text-transform:none;letter-spacing:0;margin:0}
+  .form-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:20px}
+
+  /* Data grid */
+  .grid{background:#fff;border:1px solid var(--s100);border-radius:12px;overflow:hidden}
+  table{width:100%;border-collapse:collapse}
+  thead th{
+    background:var(--s50);color:var(--s700);font-size:.72rem;font-weight:700;
+    text-transform:uppercase;letter-spacing:.04em;text-align:left;
+    padding:13px 18px;border-bottom:1px solid var(--s200);
+  }
+  tbody td{padding:13px 18px;border-bottom:1px solid var(--s100);font-size:.85rem}
+  tbody tr{cursor:pointer;transition:background .12s}
+  tbody tr:hover{background:var(--brand-50)}
+  tbody tr:last-child td{border-bottom:0}
+  .tag{
+    display:inline-block;padding:3px 9px;border-radius:6px;font-size:.72rem;
+    font-weight:700;background:var(--brand-50);color:var(--brand-700);
+  }
+  .tag.full{background:#eaf6ef;color:var(--success)}
+  .tag.inc{background:#fdf3e7;color:var(--warning)}
+  .icon-btn{
+    border:0;background:transparent;cursor:pointer;padding:6px;border-radius:6px;
+    color:var(--s500);display:inline-flex;transition:background .12s,color .12s;
+  }
+  .icon-btn:hover{background:var(--s100)}
+  .icon-btn.primary:hover{color:var(--brand-600);background:var(--brand-50)}
+  .icon-btn.danger:hover{color:var(--error);background:#fdf3f3}
+  .icon-btn svg{width:17px;height:17px}
+
+  /* Toast */
+  .toast{
+    position:fixed;bottom:24px;right:24px;background:var(--success);color:#fff;
+    padding:13px 18px;border-radius:8px;font-weight:600;font-size:.85rem;
+    box-shadow:var(--sh-lg);display:flex;align-items:center;gap:9px;
+    transform:translateX(140%);transition:transform .35s cubic-bezier(.2,.8,.2,1);z-index:50;
+  }
+  .toast.show{transform:translateX(0)}
+  .toast svg{width:18px;height:18px}
+
+  .legend{
+    margin-top:34px;padding:20px 22px;background:#fff;border:1px solid var(--s100);
+    border-radius:12px;
+  }
+  .legend h3{font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;color:var(--s500);margin-bottom:14px}
+  .legend ul{list-style:none;display:grid;grid-template-columns:1fr 1fr;gap:10px 28px}
+  .legend li{font-size:.83rem;color:var(--s700);display:flex;gap:9px;align-items:flex-start}
+  .legend li b{color:var(--s900)}
+  .legend .mk{color:var(--success);font-weight:800;flex-shrink:0}
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">
+        <svg viewBox="0 0 24 24" width="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 2 7l10 5 10-5-10-5Z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/></svg>
+      </div>
+      <div>
+        <div class="brand-name">ConfigBuilder</div>
+        <div class="brand-sub">Microsoft Fabric</div>
+      </div>
+    </div>
+    <hr class="divider">
+    <nav class="nav">
+      <div class="nav-section">Pipeline Stages</div>
+      <a class="nav-item" onclick="select(this,'Landing Tasks','Source → Landing')">
+        <svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+        <div><div class="nav-label">Landing Tasks</div><div class="nav-sub">Source → Landing</div></div>
+      </a>
+      <a class="nav-item active" onclick="select(this,'Bronze → Validated','Bronze → Validated')">
+        <svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 12 2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg>
+        <div><div class="nav-label">Bronze Tasks</div><div class="nav-sub">Bronze → Validated</div></div>
+      </a>
+      <a class="nav-item" onclick="select(this,'Silver Tasks','Validated → Enriched')">
+        <svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v3m0 12v3M3 12h3m12 0h3"/><circle cx="12" cy="12" r="4"/></svg>
+        <div><div class="nav-label">Silver Tasks</div><div class="nav-sub">Validated → Enriched</div></div>
+      </a>
+      <div class="nav-section">Design</div>
+      <a class="nav-item" onclick="select(this,'Pipeline Workflow','Orchestration DAG')">
+        <svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="6" height="6" rx="1"/><rect x="15" y="15" width="6" height="6" rx="1"/><path d="M9 6h6a3 3 0 0 1 3 3v6"/></svg>
+        <div><div class="nav-label">Pipeline Workflow</div><div class="nav-sub">Orchestration DAG</div></div>
+      </a>
+    </nav>
+    <hr class="divider">
+    <div class="user">
+      <div class="avatar">DS</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:.8rem;font-weight:600">Data Steward</div>
+        <div style="font-size:.68rem;color:var(--s500)">Signed in via MSAL</div>
+      </div>
+      <div class="dot" title="Connected"></div>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="topbar">
+      <h1 id="tbTitle">Bronze → Validated</h1>
+      <span class="chip" id="tbChip">Bronze → Validated</span>
+    </div>
+    <div class="content">
+      <div class="page-title">Bronze → Validated</div>
+      <div class="page-desc">Configure validation and load rules applied when promoting raw Bronze data into the Validated (Silver) layer.</div>
+
+      <div class="toolbar">
+        <button class="btn btn-primary" onclick="toggleForm()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>Add New Row
+        </button>
+        <button class="btn btn-outline" onclick="toast('Refreshed from Fabric SQL')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>Refresh
+        </button>
+        <div class="spacer"></div>
+        <button class="btn btn-danger" onclick="toast('All rows deleted','err')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>Delete All
+        </button>
+      </div>
+
+      <div class="card" id="editForm" style="display:none">
+        <div class="card-body">
+          <div class="form-grid">
+            <div class="field"><label>Project Name</label><input value="RetailDW"></div>
+            <div class="field"><label>Task Name</label><input value="LoadCustomers"></div>
+            <div class="field"><label>Destination Schema</label><input value="silver"></div>
+            <div class="field"><label>Destination Table</label><input value="dim_customer"></div>
+            <div class="field"><label>Load Type</label><select><option>Incremental</option><option>Full</option><option>Rolling</option></select></div>
+            <div class="field"><label>Bad Row Action</label><select><option>Drop</option><option>Fail</option><option>Allow</option></select></div>
+            <div class="check-row"><input type="checkbox" checked><label>Enable CDC</label></div>
+            <div class="check-row"><input type="checkbox" checked><label>Is Active</label></div>
+          </div>
+          <div class="form-actions">
+            <button class="btn btn-outline" onclick="toggleForm()">Cancel</button>
+            <button class="btn btn-primary" onclick="toast('Changes saved');toggleForm()">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>Save Changes
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid">
+        <table>
+          <thead><tr>
+            <th style="width:60px">ID</th><th>Project</th><th>Task</th>
+            <th>Load Type</th><th>Schema</th><th>Table</th><th style="width:110px">Actions</th>
+          </tr></thead>
+          <tbody>
+            <tr onclick="toggleForm(true)">
+              <td>1</td><td>RetailDW</td><td>LoadCustomers</td>
+              <td><span class="tag inc">Incremental</span></td><td>silver</td><td>dim_customer</td>
+              <td>
+                <button class="icon-btn primary" onclick="event.stopPropagation();toast('Opening column mapping')" title="Column Mapping"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18M8 17V9m5 8V5m5 12v-6"/></svg></button>
+                <button class="icon-btn danger" onclick="event.stopPropagation();toast('Row deleted','err')" title="Delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg></button>
+              </td>
+            </tr>
+            <tr onclick="toggleForm(true)">
+              <td>2</td><td>RetailDW</td><td>LoadOrders</td>
+              <td><span class="tag full">Full</span></td><td>silver</td><td>fact_orders</td>
+              <td>
+                <button class="icon-btn primary" onclick="event.stopPropagation();toast('Opening column mapping')" title="Column Mapping"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18M8 17V9m5 8V5m5 12v-6"/></svg></button>
+                <button class="icon-btn danger" onclick="event.stopPropagation();toast('Row deleted','err')" title="Delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg></button>
+              </td>
+            </tr>
+            <tr onclick="toggleForm(true)">
+              <td>3</td><td>FinanceMart</td><td>LoadLedger</td>
+              <td><span class="tag inc">Incremental</span></td><td>silver</td><td>fact_ledger</td>
+              <td>
+                <button class="icon-btn primary" onclick="event.stopPropagation();toast('Opening column mapping')" title="Column Mapping"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18M8 17V9m5 8V5m5 12v-6"/></svg></button>
+                <button class="icon-btn danger" onclick="event.stopPropagation();toast('Row deleted','err')" title="Delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg></button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="legend">
+        <h3>What changed in this redesign</h3>
+        <ul>
+          <li><span class="mk">✓</span><span><b>Design system</b> — one theme file; no more scattered hex values or 0.5rem fonts</span></li>
+          <li><span class="mk">✓</span><span><b>Sidebar nav</b> — replaces plain "<code>Home | Bronze | Silver</code>" text links</span></li>
+          <li><span class="mk">✓</span><span><b>Toast feedback</b> — replaces every blocking <code>alert()</code></span></li>
+          <li><span class="mk">✓</span><span><b>Confirm dialogs</b> — replace <code>window.confirm()</code></span></li>
+          <li><span class="mk">✓</span><span><b>Shared CRUD hook</b> — 3 editors de-duplicated (~120 lines each)</span></li>
+          <li><span class="mk">✓</span><span><b>Central API client</b> — no hardcoded localhost URLs</span></li>
+          <li><span class="mk">✓</span><span><b>Card-based forms</b> — consistent spacing & focus states</span></li>
+          <li><span class="mk">✓</span><span><b>Loading states</b> — progress bars instead of blank screens</span></li>
+        </ul>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div class="toast" id="toast">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m20 6-11 11-5-5"/></svg>
+  <span id="toastMsg">Saved</span>
+</div>
+
+<script>
+  function select(el,title,chip){
+    document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+    el.classList.add('active');
+    document.getElementById('tbTitle').textContent=title;
+    document.getElementById('tbChip').textContent=chip;
+  }
+  function toggleForm(forceOpen){
+    const f=document.getElementById('editForm');
+    f.style.display=(forceOpen||f.style.display==='none')?'block':'none';
+    if(f.style.display==='block') f.scrollIntoView({behavior:'smooth',block:'center'});
+  }
+  let toastTimer;
+  function toast(msg,type){
+    const t=document.getElementById('toast');
+    document.getElementById('toastMsg').textContent=msg;
+    t.style.background=type==='err'?'var(--error)':'var(--success)';
+    t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer=setTimeout(()=>t.classList.remove('show'),2600);
+  }
+</script>
+</body>
+</html>

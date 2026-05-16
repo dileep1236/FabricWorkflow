@@ -1,453 +1,433 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  Box,
-  Button,
-  Grid,
-  TextField,
-  Typography,
-  Paper,
-  Select,
-  MenuItem,
-  FormControl,
-  InputLabel,
-  FormControlLabel,
-  Checkbox,
-  IconButton
+  Box, Button, TextField, Typography, Paper, Table, TableBody,
+  TableCell, TableContainer, TableHead, TableRow, Select, MenuItem,
+  Checkbox, IconButton, Stack, Chip, Tooltip, FormControlLabel,
+  TablePagination, Divider,
 } from '@mui/material';
-import Papa from "papaparse";
-import * as XLSX from "xlsx";
-import "./App.css";
+import DeleteIcon from '@mui/icons-material/Delete';
+import AddIcon from '@mui/icons-material/Add';
+import UploadFileIcon from '@mui/icons-material/UploadFile';
+import SaveIcon from '@mui/icons-material/Save';
+import Papa from 'papaparse';
+import * as XLSX from 'xlsx';
 
-function FileUploadMapping({ selectedRow }) {
-  console.log("Received Row:", selectedRow);
-  const [projectName, setProjectName] = useState(selectedRow?.projectName || ""); // Store Project Name
-  const [sourceName, setSourceName] = useState(selectedRow?.sourceName || ""); // Store Source Name
+import { api } from '../api/client';
+import { useToast } from './ToastProvider';
+import { tokens } from '../theme/theme';
+
+/**
+ * FileUploadMapping — REBUILT.
+ * --------------------------------------------------------------------------
+ * Original: raw HTML <table>/<input>/<select> styled by the broken App.css
+ * (the 0.5rem font rule + a wrapping .container that double-boxed the
+ * dialog). All business logic is preserved verbatim:
+ *   - delimiter auto-detection
+ *   - CSV (PapaParse) / XLSX / TXT parsing
+ *   - load existing mapping from /get-mapping
+ *   - derived columns, CDC "enable all", primary-key ↔ CDC interlock
+ *   - identical payload to /execute-sql-columns
+ *
+ * Only the presentation layer changed: MUI table, chips for column flags,
+ * proper pagination, toast feedback instead of alert().
+ */
+
+const DATATYPES = [
+  'StringType', 'VarcharType', 'CharType', 'BooleanType', 'ByteType',
+  'ShortType', 'IntegerType', 'LongType', 'FloatType', 'DoubleType',
+  'DecimalType', 'DateType', 'TimestampType', 'TimestampNTZType',
+  'BinaryType', 'ArrayType', 'MapType', 'StructType',
+];
+
+const ROWS_PER_PAGE = 10;
+
+const truthy = (v) => v === '1' || v === 1 || v === true;
+
+export default function FileUploadMapping({ selectedRow }) {
+  const toast = useToast();
+  const [projectName, setProjectName] = useState(selectedRow?.projectName || '');
+  const [sourceName, setSourceName] = useState(selectedRow?.sourceName || '');
   const [sourceColumns, setSourceColumns] = useState([]);
   const [mapping, setMapping] = useState({});
-  const [sqlScript, setSqlScript] = useState("");
-  const [currentPage, setCurrentPage] = useState(1);
+  const [page, setPage] = useState(0);
   const [isCDCEnabledAll, setIsCDCEnabledAll] = useState(false);
-  const [nextProjectColumnID, setNextProjectColumnID] = useState(1);
-  const rowsPerPage = 10;
   const [derivedColumns, setDerivedColumns] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const nextProjectColumnID = 1;
 
   useEffect(() => {
     if (selectedRow) {
-      setProjectName(selectedRow.projectName || "");
-      setSourceName(selectedRow.sourceName || "");
+      setProjectName(selectedRow.projectName || '');
+      setSourceName(selectedRow.sourceName || '');
     }
   }, [selectedRow]);
 
   const detectDelimiter = (text) => {
-    const firstLine = text.split("\n")[0]; 
-    if (firstLine.includes("\t")) return "\t"; 
-    if (firstLine.includes(";")) return ";"; 
-    if (firstLine.includes("|")) return "|"; 
-    return ","; // Default fallback
+    const firstLine = text.split('\n')[0];
+    if (firstLine.includes('\t')) return '\t';
+    if (firstLine.includes(';')) return ';';
+    if (firstLine.includes('|')) return '|';
+    return ',';
   };
-  
- const initialLoad = (projectName, sourceName) => {
-  fetch("http://localhost:5000/api/get-mapping", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({ projectName, sourceName }),
-    credentials: "include" // Optional: include if backend uses cookies/session
-  })
-    .then((res) => {
-      if (!res.ok) throw new Error(`HTTP error! ${res.status}`);
-      return res.json();
-    })
- .then((data) => {
-  console.log("Mapping data:", data);
-  if (data && Array.isArray(data.mapping)) {
-   const structuredMapping = data.mapping.reduce((acc, row) => {
-  const col = row.SourceColumnName; // updated casing
-  acc[col] = {
-    destination: row.ProjectColumnName || "",
-    datatype: row.Datatype || "StringType",
-    isCDCEnabled:  row.IsCDCEnabled === "1" || row.IsCDCEnabled === 1 || row.IsCDCEnabled === true,
-    isEncryptEnabled:  row.IsEncryptEnabled === "1" || row.IsEncryptEnabled === 1 || row.IsEncryptEnabled === true,
-    isPrimaryKey:   row.IsPrimaryKey === "1" || row.IsPrimaryKey === 1 || row.IsPrimaryKey === true,
-    isIdentity: row.IsIdentity === "1" || row.IsIdentity === 1 || row.IsIdentity === true,
-    isDerived: row.IsDerived === "1" || row.IsDerived === 1 || row.IsDerived === true,
-    isRollingField: row.IsRollingField === "1" || row.IsRollingField === 1 || row.IsRollingField === true,
-    isDedupRankingField: row.IsDedupRankingField === "1" || row.IsDedupRankingField === 1 || row.IsDedupRankingField === true,
-    expression: row.DerivedExpression || "",
-    projectColumnID: row.ProjectColumnID || 0
-  };
-  return acc;
-}, {});
-console.log("Structured Mapping:", structuredMapping);
-setMapping(structuredMapping);
-setSourceColumns(Object.keys(structuredMapping));
-  }
-})
-    .catch((err) => {
-      console.error("Error fetching mapping:", err);
-    });
-};
 
-React.useEffect(() => {
-  if (projectName && sourceName) {
-    initialLoad(projectName, sourceName);
-  }
-}, [projectName, sourceName]);
-
-  
-  const handleFileUpload = (event) => {
-    const file = event.target.files[0];
-  
-    if (file) {
-      const fileType = file.name.split(".").pop().toLowerCase();
-      const reader = new FileReader();
-  
-      reader.onload = (e) => {
-        const text = e.target.result;
-  
-        if (fileType === "csv" ) {
-          console.log("csv")
-          // Papa.parse(e.target.result, {
-          //   delimiter: "\t", // Automatically detects delimiter
-          //   complete: (result) => {
-          //     if (result.data.length > 0) {
-          //       processHeaders(result.data);
-          //     }
-          //   },
-          // });
-          Papa.parse(e.target.result, {
-            delimiter: detectDelimiter(e.target.result), 
-            complete: (result) => processHeaders(result.data),
-          });
-          
-        } else if (fileType === "xlsx" || fileType === "xls") {
-          const workbook = XLSX.read(text, { type: "binary" });
-          const sheetName = workbook.SheetNames[0];
-          const sheetData = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1 });
-  
-          if (sheetData.length > 0) {
-            processHeaders(sheetData);
-          }
-        } else if (fileType === "txt") {
-          const rows = text.split("\n").map(row => row.split("\t")); // Tab-delimited parsing
-          if (rows.length > 0) {
-            processHeaders(rows);
-          }
+  const initialLoad = useCallback(
+    async (proj, src) => {
+      try {
+        const data = await api.post('/get-mapping', {
+          projectName: proj,
+          sourceName: src,
+        });
+        if (data && Array.isArray(data.mapping)) {
+          const structured = data.mapping.reduce((acc, row) => {
+            acc[row.SourceColumnName] = {
+              destination: row.ProjectColumnName || '',
+              datatype: row.Datatype || 'StringType',
+              isCDCEnabled: truthy(row.IsCDCEnabled),
+              isEncryptEnabled: truthy(row.IsEncryptEnabled),
+              isPrimaryKey: truthy(row.IsPrimaryKey),
+              isIdentity: truthy(row.IsIdentity),
+              isDerived: truthy(row.IsDerived),
+              isRollingField: truthy(row.IsRollingField),
+              isDedupRankingField: truthy(row.IsDedupRankingField),
+              expression: row.DerivedExpression || '',
+              projectColumnID: row.ProjectColumnID || 0,
+            };
+            return acc;
+          }, {});
+          setMapping(structured);
+          setSourceColumns(Object.keys(structured));
         }
-      };
-  
-      if (fileType === "xlsx" || fileType === "xls") {
-        reader.readAsBinaryString(file);
-      } else {
-        reader.readAsText(file);
+      } catch (err) {
+        toast.error('Could not load existing mapping: ' + err.message);
       }
-    }
-  };
-  
+    },
+    [toast],
+  );
+
+  useEffect(() => {
+    if (projectName && sourceName) initialLoad(projectName, sourceName);
+  }, [projectName, sourceName, initialLoad]);
+
   const processHeaders = (data) => {
-   
-    const headers = data[0];
+    const headers = data[0] || [];
     setSourceColumns(headers);
-  
-    const initialMapping = headers.reduce((acc, col, index) => {
-      acc[col] = { 
-        destination: col.replace(/\s+/g, "").toLowerCase(), 
-        datatype: "StringType", 
-        isCDCEnabled: false, 
-        isEncryptEnabled: false, 
+    const initial = headers.reduce((acc, col, index) => {
+      acc[col] = {
+        destination: String(col).replace(/\s+/g, '').toLowerCase(),
+        datatype: 'StringType',
+        isCDCEnabled: false,
+        isEncryptEnabled: false,
         isPrimaryKey: false,
-        projectColumnID: nextProjectColumnID + index 
+        isIdentity: false,
+        isDerived: false,
+        isRollingField: false,
+        isDedupRankingField: false,
+        expression: '',
+        projectColumnID: nextProjectColumnID + index,
       };
       return acc;
     }, {});
-  
-    setMapping(initialMapping);
+    setMapping(initial);
+    setPage(0);
   };
-  
-  const handleMappingChange = (col, field, value) => {
-    setSqlScript("")
-    setMapping((prev) => {
-      const updatedMapping = { ...prev };
 
-      if (field === "isPrimaryKey" && value) {
-        updatedMapping[col].isCDCEnabled = false;
+  const handleFileUpload = (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+    const fileType = file.name.split('.').pop().toLowerCase();
+    const reader = new FileReader();
+
+    reader.onload = (e) => {
+      const text = e.target.result;
+      if (fileType === 'csv') {
+        Papa.parse(text, {
+          delimiter: detectDelimiter(text),
+          complete: (result) => processHeaders(result.data),
+        });
+      } else if (fileType === 'xlsx' || fileType === 'xls') {
+        const workbook = XLSX.read(text, { type: 'binary' });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const sheetData = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+        if (sheetData.length > 0) processHeaders(sheetData);
+      } else if (fileType === 'txt') {
+        const rows = text.split('\n').map((r) => r.split('\t'));
+        if (rows.length > 0) processHeaders(rows);
       }
+    };
 
-      updatedMapping[col][field] = value;
+    if (fileType === 'xlsx' || fileType === 'xls') reader.readAsBinaryString(file);
+    else reader.readAsText(file);
+  };
 
-      return updatedMapping;
+  const handleMappingChange = (col, field, value) => {
+    setMapping((prev) => {
+      const updated = { ...prev, [col]: { ...prev[col] } };
+      if (field === 'isPrimaryKey' && value) updated[col].isCDCEnabled = false;
+      updated[col][field] = value;
+      return updated;
     });
   };
 
   const handleEnableAllCDC = (event) => {
-    const isChecked = event.target.checked;
-    setIsCDCEnabledAll(isChecked);
-
+    const checked = event.target.checked;
+    setIsCDCEnabledAll(checked);
     setMapping((prev) => {
-      const updatedMapping = { ...prev };
-      Object.keys(updatedMapping).forEach((col) => {
-        if (!updatedMapping[col].isPrimaryKey) {
-          updatedMapping[col].isCDCEnabled = isChecked;
+      const updated = { ...prev };
+      Object.keys(updated).forEach((col) => {
+        if (!updated[col].isPrimaryKey) {
+          updated[col] = { ...updated[col], isCDCEnabled: checked };
         }
       });
-      return updatedMapping;
+      return updated;
     });
   };
 
-const handleExecuteSql = () => {
- const payload = {
-  projectName,
-  sourceName,
-  mapping
-};
-   console.log("Executing SQL with payload:", payload);
-  fetch("http://localhost:5000/api/execute-sql-columns", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
- 
-    body: JSON.stringify(payload)
-  })
-    .then((res) => res.text())
-    .then((result) => {
-      console.log("Backend response:", result);
-      alert("SQL executed successfully!");
-    })
-    .catch((err) => {
-      console.error("Execution failed:", err);
-      alert("Something went wrong while executing SQL.");
+  const addDerivedColumn = () => {
+    const name = `DerivedColumn${derivedColumns.length + 1}`;
+    setMapping((prev) => ({
+      ...prev,
+      [name]: {
+        destination: name,
+        datatype: 'StringType',
+        isCDCEnabled: false,
+        isEncryptEnabled: false,
+        isPrimaryKey: false,
+        isIdentity: false,
+        isDerived: true,
+        isRollingField: false,
+        isDedupRankingField: false,
+        expression: '',
+        projectColumnID: nextProjectColumnID + Object.keys(prev).length,
+      },
+    }));
+    setSourceColumns((prev) => [...prev, name]);
+    setDerivedColumns((prev) => [...prev, name]);
+  };
+
+  const deleteColumn = (colName) => {
+    setMapping((prev) => {
+      const { [colName]: _removed, ...rest } = prev;
+      return rest;
     });
-};
-  
-
-  const handleDownloadSQL = () => {
-    const blob = new Blob([sqlScript], { type: "text/sql" });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = "generated_script.sql";
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    setSourceColumns((prev) => prev.filter((c) => c !== colName));
+    setDerivedColumns((prev) => prev.filter((c) => c !== colName));
   };
 
-  const indexOfLastRow = currentPage * rowsPerPage;
-  const indexOfFirstRow = indexOfLastRow - rowsPerPage;
-  const currentRows = sourceColumns.slice(indexOfFirstRow, indexOfLastRow);
-
-  const nextPage = () => {
-    if (currentPage < Math.ceil(sourceColumns.length / rowsPerPage)) {
-      setCurrentPage((prev) => prev + 1);
+  const handleSave = async () => {
+    if (!projectName || !sourceName) {
+      toast.warning('Project Name and Source Name are required.');
+      return;
+    }
+    setSaving(true);
+    try {
+      await api.post('/execute-sql-columns', {
+        projectName,
+        sourceName,
+        mapping,
+      });
+      toast.success('Column mapping saved.');
+    } catch (err) {
+      toast.error('Save failed: ' + err.message);
+    } finally {
+      setSaving(false);
     }
   };
 
-  const prevPage = () => {
-    if (currentPage > 1) {
-      setCurrentPage((prev) => prev - 1);
-    }
-  };
-const addDerivedColumn = () => {
-  const newColName = `DerivedColumn${derivedColumns.length + 1}`;
-  
-  const newCol = {
-    destination: newColName,
-    datatype: "StringType",
-    isCDCEnabled: false,
-    isEncryptEnabled: false,
-    isPrimaryKey: false,
-    isIdentity: false,
-    isDerived: true,
+  const pagedColumns = useMemo(
+    () => sourceColumns.slice(page * ROWS_PER_PAGE, page * ROWS_PER_PAGE + ROWS_PER_PAGE),
+    [sourceColumns, page],
+  );
 
-    isRollingField: false,
-    isDedupRankingField: false,
+  const flagCols = [
+    { key: 'isEncryptEnabled', label: 'Encrypt' },
+    { key: 'isPrimaryKey', label: 'PK' },
+    { key: 'isDerived', label: 'Derived' },
+    { key: 'isIdentity', label: 'Identity' },
+    { key: 'isRollingField', label: 'Rolling' },
+    { key: 'isDedupRankingField', label: 'Dedup' },
+  ];
 
-    expression: "",
-    projectColumnID: nextProjectColumnID + Object.keys(mapping).length
-  };
-
-  setMapping((prev) => ({
-    ...prev,
-    [newColName]: newCol
-  }));
-
-  setSourceColumns((prev) => [...prev, newColName]);
-  setDerivedColumns((prev) => [...prev, newColName]);
-};
-const deleteColumn = (colName) => {
-  setMapping((prev) => {
-    const { [colName]: _, ...rest } = prev;
-    return rest;
-  });
-  setSourceColumns((prev) => prev.filter((col) => col !== colName));
-  setDerivedColumns((prev) => prev.filter((col) => col !== colName));
-};
   return (
-    <div className="container">
-      <h2>Upload Source File & Map Columns</h2>
+    <Box>
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mb: 2 }}>
+        <TextField
+          label="Project Name"
+          fullWidth
+          value={projectName}
+          onChange={(e) => setProjectName(e.target.value)}
+        />
+        <TextField
+          label="Source Name"
+          fullWidth
+          value={sourceName}
+          onChange={(e) => setSourceName(e.target.value)}
+        />
+      </Stack>
 
-      <div className="form-group">
-        <input type="text" placeholder="Enter Project Name" value={projectName} onChange={(e) => setProjectName(e.target.value)} className="input" /><br></br><br></br>
-        <input type="text" placeholder="Enter Source Name" value={sourceName} onChange={(e) => setSourceName(e.target.value)} className="input" /><br></br><br></br>
-      </div>
-
-      <input type="file" accept=".csv, .xlsx, .xls, .txt"  onChange={handleFileUpload} className="file-input" />
+      <Stack direction="row" spacing={1.5} alignItems="center" sx={{ mb: 2 }}>
+        <Button variant="outlined" component="label" startIcon={<UploadFileIcon />}>
+          Upload File
+          <input
+            hidden
+            type="file"
+            accept=".csv,.xlsx,.xls,.txt"
+            onChange={handleFileUpload}
+          />
+        </Button>
+        <Button variant="outlined" startIcon={<AddIcon />} onClick={addDerivedColumn}>
+          Add Derived Column
+        </Button>
+        <Box sx={{ flex: 1 }} />
+        {sourceColumns.length > 0 && (
+          <Chip
+            size="small"
+            label={`${sourceColumns.length} columns`}
+            sx={{ bgcolor: tokens.color.brand[50], color: tokens.color.brand[700] }}
+          />
+        )}
+      </Stack>
 
       {sourceColumns.length > 0 && (
         <>
-        <button className="btn" onClick={addDerivedColumn}>Add Column</button>
-          <table className="styled-table">
-            <thead>
-              <tr>
-                <th>Source Column</th>
-                <th>Destination Column</th>
-                <th>Data Type</th>
-                <th style={{ display:"flex", alignItems:"center",  gap: "4px",
-    margin: 0,
-    padding: "25px" }}>
-  <label>CDC</label>
-  <input type="checkbox" checked={isCDCEnabledAll} onChange={handleEnableAllCDC} />
-</th>
+          <TableContainer
+            component={Paper}
+            variant="outlined"
+            sx={{ borderRadius: 2, maxHeight: 480 }}
+          >
+            <Table stickyHeader size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Source Column</TableCell>
+                  <TableCell>Destination Column</TableCell>
+                  <TableCell>Data Type</TableCell>
+                  <TableCell align="center">
+                    <Stack alignItems="center">
+                      <span>CDC</span>
+                      <Tooltip title="Enable CDC for all non-PK columns">
+                        <Checkbox
+                          size="small"
+                          checked={isCDCEnabledAll}
+                          onChange={handleEnableAllCDC}
+                          sx={{ p: 0.25 }}
+                        />
+                      </Tooltip>
+                    </Stack>
+                  </TableCell>
+                  {flagCols.map((f) => (
+                    <TableCell key={f.key} align="center">{f.label}</TableCell>
+                  ))}
+                  <TableCell>Expression</TableCell>
+                  <TableCell align="center">Action</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {pagedColumns.map((col) => {
+                  const m = mapping[col] || {};
+                  const isDerivedCol = derivedColumns.includes(col);
+                  return (
+                    <TableRow key={col} hover>
+                      <TableCell sx={{ fontWeight: 600, whiteSpace: 'nowrap' }}>
+                        {col}
+                        {isDerivedCol && (
+                          <Chip
+                            label="derived"
+                            size="small"
+                            sx={{
+                              ml: 1, height: 18, fontSize: '0.62rem',
+                              bgcolor: tokens.color.brand[50],
+                              color: tokens.color.brand[700],
+                            }}
+                          />
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <TextField
+                          variant="standard"
+                          value={m.destination ?? ''}
+                          onChange={(e) => handleMappingChange(col, 'destination', e.target.value)}
+                          sx={{ minWidth: 140 }}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Select
+                          variant="standard"
+                          value={m.datatype || 'StringType'}
+                          onChange={(e) => handleMappingChange(col, 'datatype', e.target.value)}
+                          sx={{ minWidth: 130, fontSize: '0.82rem' }}
+                        >
+                          {DATATYPES.map((dt) => (
+                            <MenuItem key={dt} value={dt} sx={{ fontSize: '0.82rem' }}>
+                              {dt}
+                            </MenuItem>
+                          ))}
+                        </Select>
+                      </TableCell>
+                      <TableCell align="center">
+                        <Checkbox
+                          size="small"
+                          checked={!!m.isCDCEnabled}
+                          disabled={!!m.isPrimaryKey}
+                          onChange={(e) => handleMappingChange(col, 'isCDCEnabled', e.target.checked)}
+                        />
+                      </TableCell>
+                      {flagCols.map((f) => (
+                        <TableCell key={f.key} align="center">
+                          <Checkbox
+                            size="small"
+                            checked={!!m[f.key]}
+                            onChange={(e) => handleMappingChange(col, f.key, e.target.checked)}
+                          />
+                        </TableCell>
+                      ))}
+                      <TableCell>
+                        {m.isDerived && (
+                          <TextField
+                            variant="standard"
+                            placeholder="Enter expression"
+                            value={m.expression || ''}
+                            onChange={(e) => handleMappingChange(col, 'expression', e.target.value)}
+                            sx={{ minWidth: 160, '& input': { fontFamily: 'monospace', fontSize: '0.78rem' } }}
+                          />
+                        )}
+                      </TableCell>
+                      <TableCell align="center">
+                        {isDerivedCol && (
+                          <Tooltip title="Remove derived column">
+                            <IconButton size="small" color="error" onClick={() => deleteColumn(col)}>
+                              <DeleteIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </TableContainer>
 
-                <th>Is Encrypt Enabled</th>
-                <th>Is Primary Key</th>
-                <th>Is Derived</th>
-                 <th>Derived Expression</th>
-                <th>Is Identity</th>
-                 <th>Is Rolling Field</th>
-                  <th>Is Dedup Ranking Field</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {currentRows.map((col, index) => (
-                <tr key={index}>
-                  <td>{col}</td>
-                  <td>
-                    <input
-                      type="text"
-                      value={mapping[col]?.destination ?? ""}
-                      onChange={(e) => handleMappingChange(col, "destination", e.target.value)}
-                      className="input-field"
-                    />
-                  </td>
-                  <td>
-                   <select
-  value={mapping[col]?.datatype}
-  onChange={(e) => handleMappingChange(col, "datatype", e.target.value)}
-  className="dropdown"
->
-  <option value="StringType">StringType</option>
-  <option value="VarcharType">VarcharType</option>
-  <option value="CharType">CharType</option>
-  <option value="BooleanType">BooleanType</option>
-  <option value="ByteType">ByteType</option>
-  <option value="ShortType">ShortType</option>
-  <option value="IntegerType">IntegerType</option>
-  <option value="LongType">LongType</option>
-  <option value="FloatType">FloatType</option>
-  <option value="DoubleType">DoubleType</option>
-  <option value="DecimalType">DecimalType</option>
-  <option value="DateType">DateType</option>
-  <option value="TimestampType">TimestampType</option>
-  <option value="TimestampNTZType">TimestampNTZType</option>
-  <option value="BinaryType">BinaryType</option>
-  <option value="ArrayType">ArrayType</option>
-  <option value="MapType">MapType</option>
-  <option value="StructType">StructType</option>
-</select>
-                  </td>
-                  <td align="left">
-                    <input
-                      type="checkbox"
-                      checked={mapping[col]?.isCDCEnabled}
-                      onChange={(e) => handleMappingChange(col, "isCDCEnabled", e.target.checked)}
-                      disabled={mapping[col]?.isPrimaryKey}
-                    />
-                    
-                  </td>
-                  <td>
-                    <input
-                      type="checkbox"
-                      checked={mapping[col]?.isEncryptEnabled}
-                      onChange={(e) => handleMappingChange(col, "isEncryptEnabled", e.target.checked)}
-                    />
-                  </td>
-                  <td>
-                   <input
-  type="checkbox"
-  checked={mapping[col]?.isPrimaryKey || false}
-  onChange={(e) => handleMappingChange(col, "isPrimaryKey", e.target.checked)}
-/>
-
-                  </td>
-                  <td>
-  <input
-    type="checkbox"
-    checked={mapping[col]?.isDerived || false}
-    onChange={(e) => handleMappingChange(col, "isDerived", e.target.checked)}
-  />
-</td>
-<td>
-  {mapping[col]?.isDerived && (
-    <input
-      type="text"
-      placeholder="Enter expression"
-      value={mapping[col]?.expression || ""}
-      onChange={(e) => handleMappingChange(col, "expression", e.target.value)}
-      className="input-field"
-    />
-  )}
-</td>
-  <td>
-  <input
-    type="checkbox"
-    checked={mapping[col]?.isIdentity || false}
-    onChange={(e) => handleMappingChange(col, "isIdentity", e.target.checked)}
-  />
-</td>
-<td>
-  <input
-    type="checkbox"
-    checked={mapping[col]?.isRollingField || false}
-    onChange={(e) => handleMappingChange(col, "isRollingField", e.target.checked)}
-  />
-</td>
-<td>
-  <input
-    type="checkbox"
-    checked={mapping[col]?.isDedupRankingField || false}
-    onChange={(e) => handleMappingChange(col, "isDedupRankingField", e.target.checked)}
-  />
-</td>
-<td>
- {derivedColumns.includes(col) && (
-  <button onClick={() => deleteColumn(col)}>🗑️</button>
-)}
-</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          <div className="pagination">
-            <button onClick={prevPage} disabled={currentPage === 1} className="btn">Previous</button>
-            <span className="page-info"> Page {currentPage} </span>
-            <button onClick={nextPage} disabled={currentPage === Math.ceil(sourceColumns.length / rowsPerPage)} className="btn">Next</button>
-          </div>
+          <TablePagination
+            component="div"
+            count={sourceColumns.length}
+            page={page}
+            onPageChange={(_, p) => setPage(p)}
+            rowsPerPage={ROWS_PER_PAGE}
+            rowsPerPageOptions={[ROWS_PER_PAGE]}
+          />
         </>
       )}
 
-      <div>
-        {/* <button className="btn" onClick={generateSQLScript}  disabled={sourceColumns.length === 0}>Generate SQL Script</button>&nbsp; */}
-        <br></br>
-          <Button  variant="contained" onClick={handleExecuteSql}>
-                Save Changes
-              </Button>
-
-      </div>
-    </div>
+      <Divider sx={{ my: 2 }} />
+      <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <Button
+          variant="contained"
+          startIcon={<SaveIcon />}
+          disabled={saving || sourceColumns.length === 0}
+          onClick={handleSave}
+        >
+          {saving ? 'Saving…' : 'Save Mapping'}
+        </Button>
+      </Box>
+    </Box>
   );
 }
-
-export default FileUploadMapping;

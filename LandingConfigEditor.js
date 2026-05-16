@@ -1,62 +1,64 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
-  Box, Button, Typography, Paper, IconButton, Tooltip, Dialog, DialogTitle, DialogContent,
-  FormControl, InputLabel, Select, MenuItem
+  Box, Button, Paper, IconButton, Tooltip, Dialog, DialogTitle,
+  DialogContent, Card, CardContent, LinearProgress, FormControl,
+  InputLabel, Select, MenuItem, ToggleButtonGroup, ToggleButton,
 } from '@mui/material';
 import { DataGrid } from '@mui/x-data-grid';
 import DeleteIcon from '@mui/icons-material/Delete';
-import AddIcon from '@mui/icons-material/Add';
+import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import CloseIcon from '@mui/icons-material/Close';
+import SaveIcon from '@mui/icons-material/Save';
 
 import DynamicRowEditor from './DynamicRowEditor';
 import FileUploadMapping from './FileUploadMapping';
+import { PageHeader, EditorToolbar } from './EditorChrome';
+import ConfirmDialog from './ConfirmDialog';
+import { useConfigEditor } from '../hooks/useConfigEditor';
+
+/**
+ * LandingConfigEditor — REFACTORED.
+ * --------------------------------------------------------------------------
+ * Original: ~298 lines. Unique to this editor: a "task type" filter (Query /
+ * File / API) that drives BOTH the list endpoint (?taskType=) and which form
+ * fields are shown. The shared hook now supports a `filter` so this still
+ * collapses to declarative config + the field-set switch below.
+ */
+
+const makeInitialFields = (taskType = 'Query') => ({
+  projectName: '', taskName: '', sourceType: taskType,
+  sourceConnection: '', sourceQuery: '', sourceFilePath: '',
+  destinationFilePath: '', destinationTableName: '', destinationSchemaName: '',
+  destinationConnection: '', fileName: '', fileFormat: 'Delimited',
+  columnDelimiter: '\t', rowDelimiter: '\n', textQualifier: '"',
+  hasHeader: true, loadType: '', resetExtract: '', threshold: 1000000,
+  extractType: 'incremental', enableCdc: false, isActive: true,
+  rowsToSkip: 0, extendedConfig: '', allowMultipleFiles: false,
+  badRowAction: '', archiveSourceFile: false, lastUpdatedBy: '',
+  lastUpdatedDateTime: new Date().toISOString(),
+});
 
 export default function LandingConfigEditor() {
-  const [rows, setRows] = useState([]);
-  const [selectedRow, setSelectedRow] = useState(null);
-  const [rowIdCounter, setRowIdCounter] = useState(1);
-  const [gatewayOptions, setGatewayOptions] = useState([]);
-  const [taskTypeFilter, setTaskTypeFilter] = useState('Query');
-  const [open, setOpen] = useState(false);
+  const editor = useConfigEditor({
+    listEndpoint: (taskType) =>
+      `/get-all-ingest?taskType=${encodeURIComponent(taskType || 'Query')}`,
+    saveEndpoint: '/execute-sql',
+    deleteEndpoint: '/delete-row',
+    deleteAllEndpoint: '/delete-all-rows',
+    initialFields: (taskType) => makeInitialFields(taskType),
+    initialFilter: 'Query',
+  });
 
-  const initialFields = {
-    projectName: '',
-    taskName: '',
-    sourceType: 'Query',
-    sourceConnection: '',
-    sourceQuery: '',
-    sourceFilePath: '',
-    destinationFilePath: '',
-    destinationTableName: '',
-    destinationSchemaName: '',
-    destinationConnection: '',
-    fileName: '',
-    fileFormat: 'Delimited',
-    columnDelimiter: '\t',
-    rowDelimiter: '\n',
-    textQualifier: '"',
-    hasHeader: true,
-    loadType: '',
-    resetExtract: '',
-    threshold: 1000000,
-    extractType: 'incremental',
-    enableCdc: false,
-    isActive: true,
-    rowsToSkip: 0,
-    extendedConfig: '',
-    allowMultipleFiles: false,
-    badRowAction: '',
-    archiveSourceFile: false,
-    lastUpdatedBy: '',
-    lastUpdatedDateTime: new Date().toISOString(),
-  };
+  const [mapRow, setMapRow] = useState(null);
+  const [pending, setPending] = useState(null);
+
+  const { gatewayOptions } = editor;
 
   const baseFields = [
     { label: 'Project Name', field: 'projectName', type: 'text' },
     { label: 'Task Name', field: 'taskName', type: 'text' },
-    // { label: 'Source Type', field: 'sourceType', type: 'select', options: ['Query', 'File', 'API'] },
     { label: 'Source Connection', field: 'sourceConnection', type: 'text' },
-    { label: 'Destination Connection', field: 'destinationConnection', type: 'select', options: gatewayOptions.map(g => ({ value: g.DisplayName, label: g.DisplayName })) },
+    { label: 'Destination Connection', field: 'destinationConnection', type: 'select', options: gatewayOptions.map((g) => ({ value: g.DisplayName, label: g.DisplayName })) },
     { label: 'Destination File Path', field: 'destinationFilePath', type: 'text' },
     { label: 'Destination Schema Name', field: 'destinationSchemaName', type: 'text' },
     { label: 'Destination Table Name', field: 'destinationTableName', type: 'text' },
@@ -95,203 +97,137 @@ export default function LandingConfigEditor() {
     { label: 'Has Header', field: 'hasHeader', type: 'checkbox' },
   ];
 
-  const getLandingFieldConfig = () => {
-    if (!selectedRow) return [];
-    if (selectedRow.sourceType === 'File') return [...baseFields, ...fileFields];
-    if (selectedRow.sourceType === 'API') return [...baseFields, ...apiFields];
+  const getFieldConfig = () => {
+    if (!editor.selectedRow) return [];
+    const t = editor.selectedRow.sourceType;
+    if (t === 'File') return [...baseFields, ...fileFields];
+    if (t === 'API') return [...baseFields, ...apiFields];
     return [...baseFields, ...queryFields];
   };
 
-  const camelize = str => str.charAt(0).toLowerCase() + str.slice(1);
-
-  const loadLandingData = (taskType = taskTypeFilter) => {
-    Promise.all([
-      fetch(`http://localhost:5000/api/get-all-ingest?taskType=${encodeURIComponent(taskType)}`).then(res => res.json()),
-      fetch('http://localhost:5000/api/get-datagateways').then(res => res.json())
-    ])
-      .then(([data, gateways]) => {
-        console.log('Loaded landing rows:', data);
-        const normalized = data.map((row, i) => {
-          const obj = {};
-          Object.keys(row).forEach(k => (obj[camelize(k)] = row[k]));
-          return { ...obj, id: i + 1 };
-        });
-        setRows(normalized);
-        setRowIdCounter(normalized.length + 1);
-        setGatewayOptions(gateways?.results || []);
-      })
-      .catch(err => console.error(err));
-  };
-
-  useEffect(() => {
-    loadLandingData(taskTypeFilter);
-  }, [taskTypeFilter]);
-
-  const handleFieldChange = (field, value) => {
-    setSelectedRow(prev => ({ ...prev, [field]: value }));
-  };
-
-  const handleAdd = () => {
-    const newRow = { id: rowIdCounter, ...initialFields, sourceType: taskTypeFilter };
-    setSelectedRow(newRow);
-    setRowIdCounter(prev => prev + 1);
-  };
-
-  const handleSave = () => {
-    if (!selectedRow?.projectName || !selectedRow?.taskName) {
-      alert('Project Name and Task Name are required.');
-      return;
-    }
-    const updatedRows = rows.some(r => r.id === selectedRow.id)
-      ? rows.map(r => (r.id === selectedRow.id ? selectedRow : r))
-      : [...rows, selectedRow];
-
-    setRows(updatedRows);
-    console.log(updatedRows)
-    fetch('http://localhost:5000/api/execute-sql', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rows: updatedRows })
-    })
-      .then(res => res.json())
-      .then(data => {
-        alert(data.message);
-        setSelectedRow(null);
-        loadLandingData(taskTypeFilter);
-      })
-      .catch(err => alert('Save failed: ' + err.message));
-  };
-
-  const handleDelete = async (row) => {
-    if (!window.confirm(`Delete row "${row.projectName}"?`)) return;
-    try {
-      const res = await fetch('http://localhost:5000/api/delete-row', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectName: row.projectName, taskName: row.taskName })
-      });
-      if (!res.ok) throw new Error('Delete failed');
-      setRows(prev => prev.filter(r => r.id !== row.id));
-      alert('Row deleted.');
-    } catch (err) {
-      alert(err.message);
-    }
-  };
-
-  const handleDeleteAll = () => {
-    if (!window.confirm('Delete all rows?')) return;
-    fetch('http://localhost:5000/api/delete-all-rows', { method: 'POST' })
-      .then(res => res.json())
-      .then(data => {
-        alert(data.message || 'Deleted.');
-        setRows([]);
-        setSelectedRow(null);
-        loadLandingData(taskTypeFilter);
-      })
-      .catch(err => alert('Delete all failed: ' + err.message));
-  };
-
-  const handleOpen = (row) => {
-    setSelectedRow(row);
-    setOpen(true);
-  };
-
-  const handleClose = () => {
-    setOpen(false);
-    setSelectedRow(null);
-  };
-
   const columns = [
-    { field: 'id', headerName: 'ID', width: 70 },
-    { field: 'projectName', headerName: 'Project Name', width: 200 },
-    { field: 'taskName', headerName: 'Task Name', width: 200 },
-    { field: 'destinationConnection', headerName: 'Destination Connection Name', width: 200 },
-
-    
+    { field: 'id', headerName: 'ID', width: 64 },
+    { field: 'projectName', headerName: 'Project', flex: 1, minWidth: 160 },
+    { field: 'taskName', headerName: 'Task', flex: 1, minWidth: 160 },
+    { field: 'destinationConnection', headerName: 'Destination Connection', flex: 1, minWidth: 180 },
     {
-      field: 'actions',
-      headerName: 'Actions',
-      width: 100,
-      sortable: false,
+      field: 'actions', headerName: 'Actions', width: 110, sortable: false,
       renderCell: (params) => (
-        <Box display="flex" gap={1}>
-          <IconButton color="error" onClick={() => handleDelete(params.row)}>
-            <DeleteIcon />
-          </IconButton>
-          <Tooltip title="Add Column Mapping">
-            <IconButton color="primary" onClick={() => handleOpen(params.row)}>
-              <AddIcon />
+        <Box>
+          <Tooltip title="Column Mapping">
+            <IconButton size="small" color="primary"
+              onClick={(e) => { e.stopPropagation(); setMapRow(params.row); }}>
+              <ViewColumnIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Delete">
+            <IconButton size="small" color="error"
+              onClick={(e) => { e.stopPropagation(); setPending({ row: params.row }); }}>
+              <DeleteIcon fontSize="small" />
             </IconButton>
           </Tooltip>
         </Box>
-      )
-    }
+      ),
+    },
   ];
 
   return (
-    <Box p={3}>
-      <Typography variant="h5" gutterBottom>Landing Config Editor</Typography>
+    <Box>
+      <PageHeader
+        title="Source → Landing"
+        description="Define ingestion tasks that pull data from source systems (query, file or API) into the Landing zone."
+      />
 
-      <Box display="flex" gap={2} mb={2} alignItems="center">
-        <Button variant="contained" onClick={handleAdd}>Add New Row</Button>
-        <FormControl size="small" sx={{ minWidth: 160 }}>
-          <InputLabel id="task-type-label">Task Type</InputLabel>
-          <Select
-            labelId="task-type-label"
-            value={taskTypeFilter}
-            label="Task Type"
-            onChange={(e) => {
-              setTaskTypeFilter(e.target.value);
-              setSelectedRow(null);
-            }}
-          >
-            <MenuItem value="Query">Query</MenuItem>
-            <MenuItem value="File">File</MenuItem>
-            <MenuItem value="API">API</MenuItem>
-          </Select>
-        </FormControl>
-        <Button variant="outlined" color="error" onClick={handleDeleteAll}>Delete All</Button>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2.5 }}>
+        <ToggleButtonGroup
+          exclusive
+          size="small"
+          value={editor.filter}
+          onChange={(_, v) => {
+            if (v) {
+              editor.setFilter(v);
+              editor.setSelectedRow(null);
+            }
+          }}
+          sx={{ '& .MuiToggleButton-root': { textTransform: 'none', px: 2 } }}
+        >
+          <ToggleButton value="Query">Query</ToggleButton>
+          <ToggleButton value="File">File</ToggleButton>
+          <ToggleButton value="API">API</ToggleButton>
+        </ToggleButtonGroup>
+        <Box sx={{ flex: 1 }} />
       </Box>
 
-      {selectedRow && (
-        <Box component="form" mb={4}>
-          <DynamicRowEditor
-            fields={getLandingFieldConfig()}
-            values={selectedRow}
-            onChange={handleFieldChange}
-          />
-          <Box mt={2}>
-            <Button fullWidth variant="contained" onClick={handleSave}>
-              Save Changes
-            </Button>
-          </Box>
-        </Box>
+      <EditorToolbar
+        onAdd={editor.handleAdd}
+        onReload={editor.reload}
+        onDeleteAll={() => setPending({ all: true })}
+        addLabel={`Add ${editor.filter} Task`}
+      />
+
+      {editor.selectedRow && (
+        <Card sx={{ mb: 3 }}>
+          <CardContent>
+            <DynamicRowEditor
+              fields={getFieldConfig()}
+              values={editor.selectedRow}
+              onChange={editor.handleFieldChange}
+            />
+            <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
+              <Button onClick={() => editor.setSelectedRow(null)}>Cancel</Button>
+              <Button
+                variant="contained"
+                startIcon={<SaveIcon />}
+                disabled={editor.saving}
+                onClick={editor.handleSave}
+              >
+                {editor.saving ? 'Saving…' : 'Save Changes'}
+              </Button>
+            </Box>
+          </CardContent>
+        </Card>
       )}
 
-      <Dialog open={open} onClose={handleClose} fullWidth maxWidth="md">
-        <DialogTitle>
-          Edit Landing Config for {selectedRow?.projectName}
-          <IconButton
-            aria-label="close"
-            onClick={handleClose}
-            sx={{ position: 'absolute', top: 8, right: 8 }}
-          >
+      <Paper variant="outlined" sx={{ height: 520, borderRadius: 3, overflow: 'hidden' }}>
+        {editor.loading && <LinearProgress />}
+        <DataGrid
+          rows={editor.rows}
+          columns={columns}
+          pageSizeOptions={[8, 16, 32]}
+          initialState={{ pagination: { paginationModel: { pageSize: 8 } } }}
+          disableRowSelectionOnClick
+          onRowClick={(p) => editor.setSelectedRow(p.row)}
+          sx={{ border: 0 }}
+        />
+      </Paper>
+
+      <Dialog open={Boolean(mapRow)} onClose={() => setMapRow(null)} fullWidth maxWidth="lg">
+        <DialogTitle sx={{ fontWeight: 700 }}>
+          Column Mapping — {mapRow?.projectName}
+          <IconButton onClick={() => setMapRow(null)} sx={{ position: 'absolute', top: 10, right: 10 }}>
             <CloseIcon />
           </IconButton>
         </DialogTitle>
-        <DialogContent>
-          {selectedRow && <FileUploadMapping selectedRow={selectedRow} />}
+        <DialogContent dividers>
+          {mapRow && <FileUploadMapping selectedRow={mapRow} />}
         </DialogContent>
       </Dialog>
 
-      <Paper sx={{ height: 500 }}>
-        <DataGrid
-          rows={rows}
-          columns={columns}
-          pageSize={6}
-          onRowClick={(params) => setSelectedRow(params.row)}
-        />
-      </Paper>
+      <ConfirmDialog
+        open={Boolean(pending)}
+        title={pending?.all ? 'Delete all rows?' : 'Delete this row?'}
+        message={
+          pending?.all
+            ? `This permanently removes every ${editor.filter} landing task.`
+            : `"${pending?.row?.projectName}" will be permanently removed.`
+        }
+        onCancel={() => setPending(null)}
+        onConfirm={() => {
+          if (pending.all) editor.handleDeleteAll();
+          else editor.handleDelete(pending.row);
+          setPending(null);
+        }}
+      />
     </Box>
   );
 }

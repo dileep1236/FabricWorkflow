@@ -12,15 +12,18 @@ import SaveIcon from '@mui/icons-material/Save';
 import DynamicRowEditor from './DynamicRowEditor';
 import FileUploadMapping from './FileUploadMapping';
 import { PageHeader, EditorToolbar } from './EditorChrome';
-import ConfirmDialog from './ConfirmDialog';
 import { useConfigEditor } from '../hooks/useConfigEditor';
 
 /**
  * BronzeToValidatedConfigEditor — REFACTORED.
  * --------------------------------------------------------------------------
- * Original: ~237 lines with ~120 lines of CRUD/fetch boilerplate copy-pasted
- * across three editors. Now all shared behavior lives in `useConfigEditor`
- * and the confirm dialog is the shared <ConfirmDialog>.
+ * Original file: ~237 lines, with ~120 lines of CRUD/fetch boilerplate that
+ * was copy-pasted (with minor differences) into the Landing and Enriched
+ * editors too.
+ *
+ * Now: all shared behavior lives in `useConfigEditor`. This component only
+ * declares its own endpoints, fields and columns. The visual layer is upgraded
+ * to cards, a confirm dialog and the shared page chrome.
  */
 
 const INITIAL_FIELDS = {
@@ -40,8 +43,9 @@ export default function BronzeToValidatedConfigEditor() {
     initialFields: INITIAL_FIELDS,
   });
 
+  const [mapOpen, setMapOpen] = useState(false);
   const [mapRow, setMapRow] = useState(null);
-  const [pending, setPending] = useState(null); // delete confirmation
+  const [confirm, setConfirm] = useState(null); // pending delete row
 
   const fieldConfig = [
     { label: 'Project Name', field: 'projectName', type: 'text' },
@@ -73,13 +77,13 @@ export default function BronzeToValidatedConfigEditor() {
         <Box>
           <Tooltip title="Column Mapping">
             <IconButton size="small" color="primary"
-              onClick={(e) => { e.stopPropagation(); setMapRow(params.row); }}>
+              onClick={(e) => { e.stopPropagation(); setMapRow(params.row); setMapOpen(true); }}>
               <ViewColumnIcon fontSize="small" />
             </IconButton>
           </Tooltip>
           <Tooltip title="Delete">
             <IconButton size="small" color="error"
-              onClick={(e) => { e.stopPropagation(); setPending({ row: params.row }); }}>
+              onClick={(e) => { e.stopPropagation(); setConfirm(params.row); }}>
               <DeleteIcon fontSize="small" />
             </IconButton>
           </Tooltip>
@@ -98,7 +102,7 @@ export default function BronzeToValidatedConfigEditor() {
       <EditorToolbar
         onAdd={editor.handleAdd}
         onReload={editor.reload}
-        onDeleteAll={() => setPending({ all: true })}
+        onDeleteAll={() => setConfirm({ all: true })}
       />
 
       {editor.selectedRow && (
@@ -137,10 +141,11 @@ export default function BronzeToValidatedConfigEditor() {
         />
       </Paper>
 
-      <Dialog open={Boolean(mapRow)} onClose={() => setMapRow(null)} fullWidth maxWidth="lg">
+      {/* Column mapping dialog */}
+      <Dialog open={mapOpen} onClose={() => setMapOpen(false)} fullWidth maxWidth="lg">
         <DialogTitle sx={{ fontWeight: 700 }}>
           Column Mapping — {mapRow?.projectName}
-          <IconButton onClick={() => setMapRow(null)} sx={{ position: 'absolute', top: 10, right: 10 }}>
+          <IconButton onClick={() => setMapOpen(false)} sx={{ position: 'absolute', top: 10, right: 10 }}>
             <CloseIcon />
           </IconButton>
         </DialogTitle>
@@ -149,21 +154,33 @@ export default function BronzeToValidatedConfigEditor() {
         </DialogContent>
       </Dialog>
 
-      <ConfirmDialog
-        open={Boolean(pending)}
-        title={pending?.all ? 'Delete all rows?' : 'Delete this row?'}
-        message={
-          pending?.all
-            ? 'This permanently removes every Bronze→Validated configuration row.'
-            : `"${pending?.row?.projectName}" will be permanently removed.`
-        }
-        onCancel={() => setPending(null)}
-        onConfirm={() => {
-          if (pending.all) editor.handleDeleteAll();
-          else editor.handleDelete(pending.row);
-          setPending(null);
-        }}
-      />
+      {/* Confirm delete dialog — replaces window.confirm() */}
+      <Dialog open={Boolean(confirm)} onClose={() => setConfirm(null)} maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ fontWeight: 700 }}>
+          {confirm?.all ? 'Delete all rows?' : 'Delete this row?'}
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ color: 'text.secondary', fontSize: '0.86rem', mb: 2 }}>
+            {confirm?.all
+              ? 'This permanently removes every Bronze→Validated configuration row.'
+              : `"${confirm?.projectName}" will be permanently removed.`}
+          </Box>
+          <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
+            <Button onClick={() => setConfirm(null)}>Cancel</Button>
+            <Button
+              variant="contained"
+              color="error"
+              onClick={() => {
+                if (confirm.all) editor.handleDeleteAll();
+                else editor.handleDelete(confirm);
+                setConfirm(null);
+              }}
+            >
+              Delete
+            </Button>
+          </Box>
+        </DialogContent>
+      </Dialog>
     </Box>
   );
 }

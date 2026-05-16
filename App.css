@@ -1,0 +1,221 @@
+/* General Page Styling */
+
+/* body {
+  font-family: "Roboto", sans-serif;
+  font-size:x-small;
+  background: linear-gradient(135deg, #F8F9FA, #E3E6E8);
+  color: #333;
+}
+Box{
+
+} */
+/* Container */
+
+body {
+  font-size: 12px;
+  font-family: 'Roboto', sans-serif;
+}
+
+/* Optional: reduce heading sizes */
+h1, h2, h3, h4, h5, h6 {
+  font-size: 1em;
+}
+
+/* Apply smaller font to all Material UI components */
+.MuiTypography-root,
+.MuiTextField-root,
+.MuiSelect-root,
+.MuiDialogTitle-root,
+.MuiDialogContent-root,
+.MuiDialogActions-root,
+.MuiFormControl-root,
+
+.MuiButton-root {
+  font-size: 0.5rem;
+}
+.grid-item-global {
+  border: 1px solid #ccc;
+  padding: 16px;
+  font-size: 12px;
+}
+.container {
+  max-width: 1500px;
+  margin: 40px auto;
+  padding: 20px;
+  background: white;
+  box-shadow: 0px 6px 15px rgba(0, 0, 0, 0.1);
+  border-radius: 10px;
+
+ 
+  
+  
+}
+.reactflow-container {
+  width: 100%;
+  height: 100vh; /* Make it fit the viewport */
+  overflow: hidden; /* Prevent extending beyond window */
+}
+
+
+.home {
+  max-width: 1100px;
+  min-height: 80vh; /* Full screen height */
+  margin: 40px auto;
+  padding: 20px;
+  box-shadow: 0px 6px 15px rgba(0, 0, 0, 0.1);
+  border-radius: 10px;
+  /* background-image: url(./dsBuffee.png); */
+  background-size:auto;
+  background-position: center;
+  background-repeat: no-repeat;
+  backdrop-filter: blur(8px);
+}
+@media (max-width: 768px) {
+  .home {
+    max-height: 500px; /* Limit height for smaller screens */
+    padding: 10px;
+  }
+}
+.workflow-container {
+  width: 100%;
+  height: 500px;
+}
+img {
+  width: 100%;
+  height: auto;
+  object-fit: cover;
+}
+/* Input Fields */
+.input-field {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #ddd;
+  border-radius: 5px;
+
+  transition: border-color 0.3s;
+}
+
+.input-field:focus {
+  border-color: #007bff;
+  outline: none;
+  box-shadow: 0 0 8px rgba(0, 123, 255, 0.3);
+}
+
+/* Buttons */
+.btn {
+  padding: 6px 13px;
+  background: #6483a5;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+
+  transition: background 0.3s ease;
+}
+
+.btn:hover {
+  background: #0056b3;
+}
+
+/* Styled Table */
+.styled-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 15px;
+}
+
+.styled-table th, .styled-table td {
+  border: 1px solid #ddd;
+  padding: 10px;
+  text-align: left;
+}
+
+.styled-table th {
+  background-color: #6483a5;
+  color: white;
+}
+
+.styled-table tr:nth-child(even) {
+  background-color: #f9f9f9;
+}
+
+.styled-table tr:hover {
+  background-color: #f1f1f1;
+}
+.styled-table th, .styled-table td {
+  padding: 10px;
+  text-align: left;
+  border: 1px solid #ddd;
+}
+
+/* Ensure inputs fit inside table cells */
+.styled-table input, .styled-table select {
+  width: 100%;
+  padding: 6px;
+  box-sizing: border-box; /* Prevents overflow */
+}
+
+/* Prevent input field overlap by enforcing column width */
+.styled-table th:nth-child(2),
+.styled-table td:nth-child(2) {
+  width: 200px; /* Adjust for better spacing */
+}
+.th-flex {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.styled-table th:nth-child(3),
+.styled-table td:nth-child(3) {
+  width: 150px;
+}
+/* Pagination */
+.pagination {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.btn:disabled {
+  background-color: #ccc;
+  cursor: not-allowed;
+}
+
+/* Checkbox Styling */
+input[type="checkbox"] {
+  transform: scale(1.2);
+  cursor: pointer;
+}
+.pipeline-btn {
+  padding: 10px 16px;
+  font-size: 1em;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.pipeline-btn.loading {
+  background-color: #f3f3f3;
+  color: #999;
+}
+
+.pipeline-btn.success {
+  background-color: #28a745;
+  color: white;
+}
+
+.pipeline-btn.error {
+  background-color: #dc3545;
+  color: white;
+}
+.spinner {
+  display: inline-block;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0%   { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}

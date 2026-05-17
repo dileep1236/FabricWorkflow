@@ -1,120 +1,167 @@
 import React, { useState, useRef, useCallback } from 'react';
-import { getBezierPath } from 'reactflow';
-import CustomEdge from './CustomEdge'; // Assuming you have this component
 import ReactFlow, {
-  addEdge,
-  Background,
-  Controls,
-  MiniMap,
-  useNodesState,
-  useEdgesState,
-  MarkerType,
-  Handle,
-  Position
+  Background, Controls, MiniMap, useNodesState,
+  applyEdgeChanges, addEdge, Handle, Position, BackgroundVariant,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
-import { applyEdgeChanges } from 'reactflow';
-import { Dialog, DialogTitle, DialogContent, DialogActions, TextField, Button } from '@mui/material';
-import PipelineButton from './PipelineButton'; // Assuming you have this component
-import SourceToValidatedHybridEditor from './BronzeToValidatedConfigEditor';
-// Sidebar
-const Sidebar = ({ onDragStart }) => (
-  <div style={{ padding: '10px', background: '#f3f3f3', width: '150px' }}>
-    <h5>Components</h5>
-    {['sourcetobronze', 'bronzetovalidated', 'validatedtoenriched', 'enrichedtogold'].map((component) => (
-      <div
-        key={component}
-        draggable
-        onDragStart={(e) => onDragStart(e, component)}
-        style={{
-          padding: '5px',
-          background: 'lightblue',
-          cursor: 'grab',
-          marginBottom: '5px',
-        }}
-      >
-        {component}
-      </div>
-    ))}
-  </div>
-);
+import {
+  Box, Dialog, DialogTitle, DialogContent, DialogActions, TextField,
+  Button, Typography, Chip, CircularProgress, Stack, Paper,
+} from '@mui/material';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import ErrorIcon from '@mui/icons-material/Error';
+import CloseIcon from '@mui/icons-material/Close';
 
+import CustomEdge from './CustomEdge';
+import { api } from '../api/client';
+import { useToast } from './ToastProvider';
+import { tokens } from '../theme/theme';
 
-// Custom Node
-const CustomNode = ({ id, data }) => {
-  const { label, deleteNode, status } = data;
+/**
+ * PipelineWorkflow — REDESIGNED.
+ * --------------------------------------------------------------------------
+ * The full DAG logic is preserved verbatim:
+ *   - drag-from-palette → onDrop creates a 'customNode'
+ *   - onConnect adds a 'custom' edge with an incrementing sequence
+ *   - onEdgesChange via applyEdgeChanges
+ *   - double-click opens the node param editor (label/project/source/runId)
+ *   - handleRun fires all nodes in parallel against /run-pipeline and maps
+ *     each node's status to loading/success/error
+ *
+ * Only the look changed: a branded component palette, polished status-aware
+ * nodes, a themed run bar, MiniMap/Controls styling, and toast feedback.
+ */
 
-  const getBackground = () => {
-    switch (status) {
-      case 'loading': return '#fff4cc';
-      case 'success': return '#d4f7dc';
-      case 'error': return '#fde3e3';
-      default: return '#ffffff';
-    }
-  };
+const COMPONENTS = [
+  { type: 'sourcetobronze', label: 'Source → Bronze' },
+  { type: 'bronzetovalidated', label: 'Bronze → Validated' },
+  { type: 'validatedtoenriched', label: 'Validated → Enriched' },
+  { type: 'enrichedtogold', label: 'Enriched → Gold' },
+];
 
+const STATUS_STYLE = {
+  idle: { bg: '#fff', border: tokens.color.slate[200], accent: tokens.color.slate[300] },
+  loading: { bg: '#fff9ec', border: tokens.color.warning, accent: tokens.color.warning },
+  success: { bg: '#eefaf2', border: tokens.color.success, accent: tokens.color.success },
+  error: { bg: '#fdf1f1', border: tokens.color.error, accent: tokens.color.error },
+};
+
+function CustomNode({ id, data }) {
+  const { label, deleteNode, status = 'idle' } = data;
+  const s = STATUS_STYLE[status] || STATUS_STYLE.idle;
   return (
-    <div style={{
-      padding: '10px',
-      background: getBackground(),
-      border: '1px solid black',
-      borderRadius: '6px',
-      position: 'relative',
-      textAlign: 'center',
-      minWidth: '120px'
-    }}>
-      <span>{label}</span>
-      <Handle type="target" position={Position.Top} />
-      <Handle type="source" position={Position.Bottom} />
-      <div style={{ marginTop: '6px', fontSize: '14px' }}>
-        {status === 'loading' && <span className="spinner">⏳</span>}
-        {status === 'success' && <span style={{ color: 'green' }}>✅</span>}
-        {status === 'error' && <span style={{ color: 'red' }}>❌</span>}
-      </div>
+    <Box
+      sx={{
+        minWidth: 168,
+        bgcolor: s.bg,
+        border: `1.5px solid ${s.border}`,
+        borderRadius: 2,
+        boxShadow: tokens.shadow.sm,
+        position: 'relative',
+        overflow: 'hidden',
+      }}
+    >
+      <Box sx={{ height: 4, bgcolor: s.accent }} />
+      <Handle type="target" position={Position.Top} style={{ background: tokens.color.brand[500] }} />
+      <Box sx={{ px: 1.5, py: 1.25, textAlign: 'center' }}>
+        <Typography sx={{ fontSize: '0.8rem', fontWeight: 700, color: tokens.color.slate[900] }}>
+          {label}
+        </Typography>
+        <Box sx={{ mt: 0.5, height: 18, display: 'grid', placeItems: 'center' }}>
+          {status === 'loading' && <CircularProgress size={13} sx={{ color: tokens.color.warning }} />}
+          {status === 'success' && <CheckCircleIcon sx={{ fontSize: 15, color: tokens.color.success }} />}
+          {status === 'error' && <ErrorIcon sx={{ fontSize: 15, color: tokens.color.error }} />}
+        </Box>
+      </Box>
+      <Handle type="source" position={Position.Bottom} style={{ background: tokens.color.brand[500] }} />
       <button
-        onClick={(e) => {
-          e.stopPropagation();
-          deleteNode(id);
-        }}
+        onClick={(e) => { e.stopPropagation(); deleteNode(id); }}
+        title="Remove node"
         style={{
-          position: 'absolute',
-          top: '-7px',
-          right: '-7px',
-          width: '15px',
-          height: '15px',
-          borderRadius: '50%',
-          border: 'none',
-          background: '#ccc',
-          cursor: 'pointer'
+          position: 'absolute', top: -8, right: -8, width: 18, height: 18,
+          borderRadius: '50%', border: '1px solid ' + tokens.color.slate[200],
+          background: '#fff', color: tokens.color.slate[500], cursor: 'pointer',
+          fontSize: 12, lineHeight: 1, display: 'grid', placeItems: 'center',
+          boxShadow: tokens.shadow.sm,
         }}
       >
         ×
       </button>
-    </div>
+    </Box>
   );
-};
+}
 
 const nodeTypes = { customNode: CustomNode };
+const edgeTypes = { custom: CustomEdge };
 
-const PipelineWorkflow1 = () => {
+function Palette({ onDragStart }) {
+  return (
+    <Paper
+      variant="outlined"
+      sx={{
+        width: 210, p: 2, borderRadius: 0, borderTop: 0, borderBottom: 0,
+        borderLeft: 0, bgcolor: tokens.color.slate[25],
+        borderColor: tokens.color.slate[100],
+      }}
+    >
+      <Typography
+        sx={{
+          fontSize: '0.66rem', fontWeight: 700, letterSpacing: '0.08em',
+          textTransform: 'uppercase', color: tokens.color.slate[500], mb: 1.5,
+        }}
+      >
+        Components
+      </Typography>
+      <Stack spacing={1}>
+        {COMPONENTS.map((c) => (
+          <Box
+            key={c.type}
+            draggable
+            onDragStart={(e) => onDragStart(e, c.type)}
+            sx={{
+              display: 'flex', alignItems: 'center', gap: 1,
+              px: 1.5, py: 1.25, borderRadius: 1.5, cursor: 'grab',
+              bgcolor: '#fff', border: `1px solid ${tokens.color.slate[100]}`,
+              fontSize: '0.78rem', fontWeight: 600, color: tokens.color.slate[700],
+              transition: 'all .15s',
+              '&:hover': {
+                borderColor: tokens.color.brand[300],
+                boxShadow: tokens.shadow.sm,
+              },
+              '&:active': { cursor: 'grabbing' },
+            }}
+          >
+            <DragIndicatorIcon sx={{ fontSize: 16, color: tokens.color.slate[300] }} />
+            {c.label}
+          </Box>
+        ))}
+      </Stack>
+      <Typography sx={{ mt: 2, fontSize: '0.68rem', color: tokens.color.slate[300] }}>
+        Drag a component onto the canvas, then connect nodes and set an order.
+      </Typography>
+    </Paper>
+  );
+}
+
+export default function PipelineWorkflow() {
+  const toast = useToast();
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges] = useState([]);
-  const [workflowStatus, setWorkflowStatus] = useState("idle"); // "idle" | "running" | "done"
+  const [workflowStatus, setWorkflowStatus] = useState('idle');
   const [edgeSequenceCounter, setEdgeSequenceCounter] = useState(1);
   const [selectedNode, setSelectedNode] = useState(null);
   const [nodeLabel, setNodeLabel] = useState('');
   const [nodeParams, setNodeParams] = useState({
-    projectname: '',
-    sourcename: '',
-    pipelinerunid: ''
+    projectname: '', sourcename: '', pipelinerunid: '',
   });
+  const wrapperRef = useRef(null);
 
-  const reactFlowWrapper = useRef(null);
-
-  const deleteNode = (id) => {
+  const deleteNode = useCallback((id) => {
     setNodes((prev) => prev.filter((n) => n.id !== id));
     setEdges((prev) => prev.filter((e) => e.source !== id && e.target !== id));
-  };
+  }, [setNodes]);
 
   const onDragStart = (event, type) => {
     event.dataTransfer.setData('application/reactflow', type);
@@ -122,433 +169,186 @@ const PipelineWorkflow1 = () => {
   };
 
   const onDrop = (event) => {
-    
     event.preventDefault();
     const nodeType = event.dataTransfer.getData('application/reactflow');
     if (!nodeType) return;
-
-    const bounds = reactFlowWrapper.current.getBoundingClientRect();
+    const bounds = wrapperRef.current.getBoundingClientRect();
     const position = {
       x: event.clientX - bounds.left,
-      y: event.clientY - bounds.top
+      y: event.clientY - bounds.top,
     };
-
-    const newNode = {
-      id: `${+new Date()}`,
-      type: 'customNode',
-      position,
-      data: {
-        label: nodeType,
-        deleteNode,
-        parameters: {
-          projectname: '',
-          sourcename: '',
-          pipelinerunid: ''
-        }
+    setNodes((nds) => [
+      ...nds,
+      {
+        id: `${+new Date()}`,
+        type: 'customNode',
+        position,
+        data: {
+          label: nodeType,
+          deleteNode,
+          parameters: { projectname: '', sourcename: '', pipelinerunid: '' },
+        },
+        status: 'idle',
       },
-      status: 'idle'
-    };
-
-    setNodes((nds) => [...nds, newNode]);
+    ]);
   };
-// const [edges, setEdges] = useState([
-//   {
-//     id: 'e1-2',
-//     source: '1',
-//     target: '2',
-//     type: 'custom',
-   
-//     data: {
-//        sequence: 1,
-//       onDelete: (edgeId) => {
-//         setEdges((eds) => eds.filter((e) => e.id !== edgeId));
-//       },
-//       onSequenceChange: handleSequenceChange
-//     },
-//   },
-// ]);
+
   const onEdgesChange = useCallback(
-  (changes) => {
-    setEdges((eds) => applyEdgeChanges(changes, eds));
-  },
-  [setEdges]
-);
-const handleSequenceChange = (edgeId, newSeq) => {
-  setEdges((edges) =>
-    edges.map((e) =>
-      e.id === edgeId ? { ...e, data: { ...e.data, sequence: newSeq } } : e
-    )
+    (changes) => setEdges((eds) => applyEdgeChanges(changes, eds)),
+    [],
   );
-};
-const onConnect = (params) => {
-  const newEdge = {
-    ...params,
-    id: `${params.source}-${params.target}`,
-    type: 'custom',
-    data: {
-       sequence: edgeSequenceCounter,
-      onDelete: (edgeId) => {
-        setEdges((eds) => eds.filter((e) => e.id !== edgeId));
-      },
-      onSequenceChange: handleSequenceChange
-    },
+
+  const handleSequenceChange = (edgeId, newSeq) => {
+    setEdges((eds) =>
+      eds.map((e) =>
+        e.id === edgeId ? { ...e, data: { ...e.data, sequence: newSeq } } : e,
+      ),
+    );
   };
-  setEdges((eds) => [...eds, newEdge]);
-   setEdgeSequenceCounter((prev) => prev + 1);
-};
+
+  const onConnect = (params) => {
+    const newEdge = {
+      ...params,
+      id: `${params.source}-${params.target}`,
+      type: 'custom',
+      data: {
+        sequence: edgeSequenceCounter,
+        onDelete: (edgeId) =>
+          setEdges((eds) => eds.filter((e) => e.id !== edgeId)),
+        onSequenceChange: handleSequenceChange,
+      },
+    };
+    setEdges((eds) => addEdge(newEdge, eds));
+    setEdgeSequenceCounter((p) => p + 1);
+  };
+
   const onNodeDoubleClick = (_, node) => {
     setSelectedNode(node);
     setNodeLabel(node.data.label);
-    setNodeParams(node.data.parameters || {});
+    setNodeParams(node.data.parameters || { projectname: '', sourcename: '', pipelinerunid: '' });
   };
 
-  const handleSave = () => {
-    const updated = nodes.map((node) =>
-      node.id === selectedNode.id
-        ? {
-            ...node,
-            data: {
-              ...node.data,
-              label: nodeLabel,
-              deleteNode,
-              parameters: nodeParams
-            }
-          }
-        : node
-    );
-    setNodes(updated);
-    setSelectedNode(null);
-  };
-
-const [status, setStatus] = useState("idle"); // "idle" | "loading" | "success" | "error"
-  // const handleRun = async () => {
-  //   for (const node of nodes) {
-  //     const { parameters = {}, label } = node.data;
-  //     const payload = {
-  //       projectname: parameters.projectname || 'defaultProject',
-  //       sourcename: parameters.sourcename || 'defaultSource',
-  //       pipelinename: label,
-  //       pipelinerunid: parameters.pipelinerunid || `run_${Date.now()}`
-  //     };
-
-  //     try {
-  //       const res = await fetch('http://localhost:5000/api/run-pipeline', {
-  //         method: 'POST',
-  //         headers: { 'Content-Type': 'application/json' },
-  //         body: JSON.stringify(payload)
-  //       });
-
-  //       const result = await res.json();
-  //           if (result.status === "Succeeded") {
-  //     setStatus("success");
-  //   } else {
-  //     setStatus("error");
-  //   }
-  //       console.log(`✅ Triggered ${label}:`, result.runId);
-  //     } catch (err) {
-  //       console.error(`❌ Failed ${label}:`, err);
-  //     }
-  //   }
-  // };
-  const traverseAndExecute = async () => {
-  const nodeMap = new Map(nodes.map((n) => [n.id, n]));
-  const adjacency = new Map();
-
-  // Build adjacency list from edges
-  edges.forEach(({ source, target }) => {
-    if (!adjacency.has(source)) adjacency.set(source, []);
-    adjacency.get(source).push(target);
-  });
-
-  const visited = new Set();
-  const recursionStack = new Set();
-  let cycleDetected = false;
-
-  const dfs = async (nodeId) => {
-    if (recursionStack.has(nodeId)) {
-      console.error(`♻️ Cycle detected at node ${nodeId}`);
-      cycleDetected = true;
-      return;
-    }
-
-    if (visited.has(nodeId) || cycleDetected) return;
-
-    recursionStack.add(nodeId);
-    visited.add(nodeId);
-
-    const currentNode = nodeMap.get(nodeId);
-    if (!currentNode) return;
-
+  const handleSaveNode = () => {
     setNodes((prev) =>
-      prev.map((n) =>
-        n.id === nodeId ? { ...n, data: { ...n.data, status: 'loading' } } : n
-      )
+      prev.map((node) =>
+        node.id === selectedNode.id
+          ? {
+              ...node,
+              data: {
+                ...node.data,
+                label: nodeLabel,
+                deleteNode,
+                parameters: nodeParams,
+              },
+            }
+          : node,
+      ),
     );
-
-    try {
-      const payload = {
-        projectname: currentNode.data.parameters?.projectname || 'defaultProject',
-        sourcename: currentNode.data.parameters?.sourcename || 'defaultSource',
-        pipelinename: currentNode.data.label,
-        pipelinerunid:
-          currentNode.data.parameters?.pipelinerunid || `run_${Date.now()}`
-      };
-
-      const res = await fetch('http://localhost:5000/api/run-pipeline', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      const result = await res.json();
-      const status = result.status === 'Completed' ? 'success' : 'error';
-
-      setNodes((prev) =>
-        prev.map((n) =>
-          n.id === nodeId ? { ...n, data: { ...n.data, status } } : n
-        )
-      );
-
-      console.log(`✅ Ran: ${currentNode.data.label}`);
-    } catch (err) {
-      setNodes((prev) =>
-        prev.map((n) =>
-          n.id === nodeId ? { ...n, data: { ...n.data, status: 'error' } } : n
-        )
-      );
-      console.error(`❌ Error at ${currentNode.data.label}`, err);
-    }
-
-    const children = adjacency.get(nodeId) || [];
-    for (const childId of children) {
-      await dfs(childId);
-    }
-
-    recursionStack.delete(nodeId);
+    setSelectedNode(null);
+    toast.success('Node updated.');
   };
-
-  // Find all start nodes
-  const startNodes = nodes.filter((n) => n.type === 'start');
-  if (startNodes.length === 0) {
-    console.warn('⚠️ No start nodes found.');
-    return;
-  }
-
-  for (const start of startNodes) {
-    await dfs(start.id);
-    if (cycleDetected) {
-      alert('⚠️ Cycle detected in the graph. Execution halted.');
-      break;
-    }
-  }
-};
-
-// const executeEdgesBySequence = async () => {
-//   const sortedEdges = [...edges].sort(
-//     (a, b) => (a.data?.sequence ?? 0) - (b.data?.sequence ?? 0)
-//   );
-
-//   for (const edge of sortedEdges) {
-//     const source = nodes.find((n) => n.id === edge.source);
-//     const target = nodes.find((n) => n.id === edge.target);
-
-//     if (!source || !target) {
-//       console.warn(`⚠️ Skipping edge ${edge.id}: missing source or target`);
-//       continue;
-//     }
-
-//     // Mark nodes as running
-//     setNodes((prev) =>
-//       prev.map((n) =>
-//         n.id === source.id || n.id === target.id
-//           ? { ...n, data: { ...n.data, status: "loading" } }
-//           : n
-//       )
-//     );
-//   await new Promise((res) => setTimeout(res, 100));
-//     try {
-//       const payload = {
-//         projectname: source.data.parameters?.projectname || "defaultProject",
-//         sourcename: source.data.parameters?.sourcename || "defaultSource",
-//         pipelinename: source.data.label,
-//         pipelinerunid:
-//           source.data.parameters?.pipelinerunid || `run_${Date.now()}`,
-//       };
-
-//       const res = await fetch("http://localhost:5000/api/run-pipeline", {
-//         method: "POST",
-//         headers: { "Content-Type": "application/json" },
-//         body: JSON.stringify(payload),
-//       });
-
-//       const result = await res.json();
-//       const status = result.status === "Completed" ? "success" : "error";
-
-//       setNodes((prev) =>
-//         prev.map((n) =>
-//           n.id === source.id || n.id === target.id
-//             ? { ...n, data: { ...n.data, status } }
-//             : n
-//         )
-//       );
-
-//       console.log(`✅ Executed edge ${edge.id} [${edge.data.sequence}]`);
-//     } catch (err) {
-//       setNodes((prev) =>
-//         prev.map((n) =>
-//           n.id === source.id || n.id === target.id
-//             ? { ...n, data: { ...n.data, status: "error" } }
-//             : n
-//         )
-//       );
-//       console.error(`❌ Edge ${edge.id} failed:`, err);
-//     }
-//   }
-// };
 
   const handleRun = async () => {
-  setWorkflowStatus("running");
-
-  const promises = nodes.map(async (node) => {
-    const { parameters = {}, label } = node.data;
-    const nodeId = node.id;
-    const payload = {
-      projectname: parameters.projectname || 'defaultProject',
-      sourcename: parameters.sourcename || 'defaultSource',
-      pipelinename: label,
-      pipelinerunid: parameters.pipelinerunid || `run_${Date.now()}`
-    };
-
-    setNodes((prev) =>
-      prev.map((n) =>
-        n.id === nodeId
-          ? { ...n, data: { ...n.data, status: 'loading' } }
-          : n
-      )
-    );
-
-    try {
-      const res = await fetch('http://localhost:5000/api/run-pipeline', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      const result = await res.json();
-
-      setNodes((prev) =>
-        prev.map((n) =>
-          n.id === nodeId
-            ? {
-                ...n,
-                data: {
-                  ...n.data,
-                  status: result.status === 'Completed' ? 'success' : 'error'
-                }
-              }
-            : n
-        )
-      );
-
-      console.log(`✅ Triggered ${label}:`, result.runId);
-    } catch (err) {
-      setNodes((prev) =>
-        prev.map((n) =>
-          n.id === nodeId
-            ? { ...n, data: { ...n.data, status: 'error' } }
-            : n
-        )
-      );
-      console.error(`❌ Failed ${label}:`, err);
+    if (nodes.length === 0) {
+      toast.warning('Add at least one node before running.');
+      return;
     }
-  });
+    setWorkflowStatus('running');
 
-  //promises is now defined
-  await Promise.allSettled(promises);
-  setWorkflowStatus("done");
-};
-// const handleRun = async () => {
-//   setWorkflowStatus("running");
+    const promises = nodes.map(async (node) => {
+      const { parameters = {}, label } = node.data;
+      const nodeId = node.id;
+      const payload = {
+        projectname: parameters.projectname || 'defaultProject',
+        sourcename: parameters.sourcename || 'defaultSource',
+        pipelinename: label,
+        pipelinerunid: parameters.pipelinerunid || `run_${Date.now()}`,
+      };
 
-//   try {
-//     await traverseAndExecute();
-//   } catch (err) {
-//     console.error("Execution failed:", err);
-//   }
+      setNodes((prev) =>
+        prev.map((n) =>
+          n.id === nodeId ? { ...n, data: { ...n.data, status: 'loading' } } : n,
+        ),
+      );
 
-//   setWorkflowStatus("done");
-// };
-// const handleRun = async () => {
-//   setStatus("loading");
+      try {
+        const result = await api.post('/run-pipeline', payload);
+        setNodes((prev) =>
+          prev.map((n) =>
+            n.id === nodeId
+              ? {
+                  ...n,
+                  data: {
+                    ...n.data,
+                    status: result.status === 'Completed' ? 'success' : 'error',
+                  },
+                }
+              : n,
+          ),
+        );
+      } catch (err) {
+        setNodes((prev) =>
+          prev.map((n) =>
+            n.id === nodeId ? { ...n, data: { ...n.data, status: 'error' } } : n,
+          ),
+        );
+      }
+    });
 
-//   try {
-//     const res = await fetch("http://localhost:5000/api/run-pipeline", {
-//       method: "POST",
-//       headers: { "Content-Type": "application/json" },
-//       body: JSON.stringify({ /* your payload */ })
-//     });
-
-//     const data = await res.json();
-
-//     if (data.status === "Succeeded") {
-//       setStatus("success");
-//     } else {
-//       setStatus("error");
-//     }
-//   } catch (error) {
-//     console.error("Pipeline trigger failed:", error);
-//     setStatus("error");
-//   }
-// };
+    await Promise.allSettled(promises);
+    setWorkflowStatus('done');
+    toast.success('Workflow run complete.');
+  };
 
   return (
-    <div style={{ display: 'flex', height: '100vh' }}>
-      <Sidebar onDragStart={onDragStart} />
-      <div
-        ref={reactFlowWrapper}
-        className="workflow-area"
+    <Box
+      sx={{
+        display: 'flex',
+        height: 'calc(100vh - 124px)',
+        border: `1px solid ${tokens.color.slate[100]}`,
+        borderRadius: 3,
+        overflow: 'hidden',
+        bgcolor: '#fff',
+      }}
+    >
+      <Palette onDragStart={onDragStart} />
+
+      <Box
+        ref={wrapperRef}
         onDrop={onDrop}
         onDragOver={(e) => e.preventDefault()}
-        style={{ flexGrow: 1, position: 'relative' }}
+        sx={{ flex: 1, position: 'relative' }}
       >
-       
-     <button
-  onClick={handleRun}
-  disabled={workflowStatus === "running"}
-  style={{
-    position: 'absolute',
-    top: '20px',
-    right: '20px',
-    padding: '10px 16px',
-    background: '#0078d4',
-    color: 'white',
-    border: 'none',
-    borderRadius: '6px',
-    fontWeight: 'bold',
-    zIndex: 10,
-    cursor: workflowStatus === "running" ? 'not-allowed' : 'pointer'
-  }}
->
-  {workflowStatus === "running" ? (
-    <>
-      Running...
-      <span className="spinner">⏳</span>
-    </>
-  ) : (
-    "Run Workflow 🚀"
-  )}
-</button>
-{/* <PipelineButton
-  payload={{
-    parameters: {
-      ProjectName: "MyProject",
-      Source: "MySource",
-      PipelineName: "MyPipeline",
-      pipelinerunid: "run-001"
-    }
-  }}
-  endpoint="http://localhost:5000/api/run-pipeline"
-/> */}
+        <Stack
+          direction="row"
+          spacing={1.5}
+          sx={{
+            position: 'absolute', top: 16, right: 16, zIndex: 10,
+            alignItems: 'center',
+          }}
+        >
+          <Chip
+            size="small"
+            label={`${nodes.length} nodes · ${edges.length} edges`}
+            sx={{
+              bgcolor: '#fff', border: `1px solid ${tokens.color.slate[100]}`,
+              color: tokens.color.slate[500], fontWeight: 600,
+            }}
+          />
+          <Button
+            variant="contained"
+            startIcon={
+              workflowStatus === 'running'
+                ? <CircularProgress size={16} color="inherit" />
+                : <PlayArrowIcon />
+            }
+            disabled={workflowStatus === 'running'}
+            onClick={handleRun}
+          >
+            {workflowStatus === 'running' ? 'Running…' : 'Run Workflow'}
+          </Button>
+        </Stack>
+
         <ReactFlow
           nodes={nodes.map((n) => ({ ...n, data: { ...n.data, deleteNode } }))}
           edges={edges}
@@ -556,61 +356,93 @@ const [status, setStatus] = useState("idle"); // "idle" | "loading" | "success" 
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
           onNodeDoubleClick={onNodeDoubleClick}
-          edgeTypes={{ custom: CustomEdge }}
           nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
+          fitView
+          proOptions={{ hideAttribution: true }}
         >
-          <Controls />
-          <MiniMap />
-          <Background />
+          <Background
+            variant={BackgroundVariant.Dots}
+            gap={20}
+            size={1}
+            color={tokens.color.slate[200]}
+          />
+          <Controls
+            style={{
+              borderRadius: 8,
+              border: `1px solid ${tokens.color.slate[100]}`,
+              boxShadow: tokens.shadow.sm,
+            }}
+          />
+          <MiniMap
+            pannable
+            zoomable
+            nodeColor={() => tokens.color.brand[300]}
+            maskColor="rgba(244,246,248,0.7)"
+            style={{
+              borderRadius: 8,
+              border: `1px solid ${tokens.color.slate[100]}`,
+            }}
+          />
         </ReactFlow>
+      </Box>
 
-      <Dialog open={!!selectedNode} onClose={() => setSelectedNode(null)} fullWidth maxWidth="md">
-  <DialogTitle>Edit Node</DialogTitle>
-  <DialogContent>
-    <TextField
-      label="Label"
-      fullWidth
-      value={nodeLabel}
-      onChange={(e) => setNodeLabel(e.target.value)}
-      margin="normal"
-    />
-    <TextField
-      label="Project Name"
-      fullWidth
-      value={nodeParams.projectname}
-      onChange={(e) =>
-        setNodeParams((prev) => ({ ...prev, projectname: e.target.value }))
-      }
-      margin="normal"
-    />
-    <TextField
-      label="Source Name"
-      fullWidth
-      value={nodeParams.sourcename}
-      onChange={(e) =>
-        setNodeParams((prev) => ({ ...prev, sourcename: e.target.value }))
-      }
-      margin="normal"
-    />
-    <TextField
-      label="Pipeline Run ID"
-      fullWidth
-      value={nodeParams.pipelinerunid}
-      onChange={(e) =>
-        setNodeParams((prev) => ({ ...prev, pipelinerunid: e.target.value }))
-      }
-      margin="normal"
-    />
-    {/* <SourceToValidatedHybridEditor></SourceToValidatedHybridEditor> */}
-  </DialogContent>
-  <DialogActions>
-    <Button onClick={handleSave} variant="contained">Save</Button>
-    <Button onClick={() => setSelectedNode(null)}>Cancel</Button>
-  </DialogActions>
-</Dialog>
-      </div>
-    </div>
+      <Dialog
+        open={!!selectedNode}
+        onClose={() => setSelectedNode(null)}
+        fullWidth
+        maxWidth="sm"
+      >
+        <DialogTitle sx={{ fontWeight: 700 }}>
+          Edit Node
+          <Button
+            onClick={() => setSelectedNode(null)}
+            sx={{ position: 'absolute', top: 12, right: 12, minWidth: 0, p: 0.5 }}
+          >
+            <CloseIcon fontSize="small" />
+          </Button>
+        </DialogTitle>
+        <DialogContent dividers>
+          <Stack spacing={2} sx={{ mt: 0.5 }}>
+            <TextField
+              label="Label"
+              fullWidth
+              value={nodeLabel}
+              onChange={(e) => setNodeLabel(e.target.value)}
+            />
+            <TextField
+              label="Project Name"
+              fullWidth
+              value={nodeParams.projectname}
+              onChange={(e) =>
+                setNodeParams((p) => ({ ...p, projectname: e.target.value }))
+              }
+            />
+            <TextField
+              label="Source Name"
+              fullWidth
+              value={nodeParams.sourcename}
+              onChange={(e) =>
+                setNodeParams((p) => ({ ...p, sourcename: e.target.value }))
+              }
+            />
+            <TextField
+              label="Pipeline Run ID"
+              fullWidth
+              value={nodeParams.pipelinerunid}
+              onChange={(e) =>
+                setNodeParams((p) => ({ ...p, pipelinerunid: e.target.value }))
+              }
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setSelectedNode(null)}>Cancel</Button>
+          <Button variant="contained" onClick={handleSaveNode}>
+            Save
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </Box>
   );
-};
-
-export default PipelineWorkflow1;
+}
